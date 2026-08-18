@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import type { KeyboardEvent } from 'react';
+import type { KeyboardEvent, FormEvent } from 'react';
 
 interface TypingTestProps {
   sourceText: string;
@@ -22,12 +22,13 @@ export function TypingTest({ sourceText, isCustom = false, onComplete }: TypingT
   const [totalKeystrokes, setTotalKeystrokes] = useState(0);
 
   const statsRef = useRef({ typed, totalKeystrokes, errors });
+  const hiddenInputRef = useRef<HTMLTextAreaElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     statsRef.current = { typed, totalKeystrokes, errors };
   }, [typed, totalKeystrokes, errors]);
 
-  // For custom mode: use exact text. For random mode: repeat + slice.
   const text = (() => {
     if (isCustom) {
       return sourceText.trim();
@@ -41,10 +42,12 @@ export function TypingTest({ sourceText, isCustom = false, onComplete }: TypingT
     return repeatedWords.slice(0, 300).join(' ');
   })();
 
-  const containerRef = useRef<HTMLDivElement>(null);
+  const focusInput = () => {
+    hiddenInputRef.current?.focus();
+  };
 
   useEffect(() => {
-    containerRef.current?.focus();
+    focusInput();
   }, []);
 
   useEffect(() => {
@@ -105,41 +108,66 @@ export function TypingTest({ sourceText, isCustom = false, onComplete }: TypingT
     return () => clearInterval(interval);
   }, [startTime, isCustom, customMode, mode]);
 
-  const handleKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    e.preventDefault();
+  const handleCharInput = (char: string) => {
+    if (typed.length >= text.length) return;
 
-    if (e.key === "Backspace") {
-      setTyped((prev) => prev.slice(0, -1));
-      return;
+    const currentStartTime = startTime || Date.now();
+    if (!startTime) setStartTime(currentStartTime);
+
+    const newTotalKeystrokes = totalKeystrokes + 1;
+    setTotalKeystrokes(newTotalKeystrokes);
+
+    const isCorrect = char === text[typed.length];
+    const newErrors = errors + (isCorrect ? 0 : 1);
+    if (!isCorrect) {
+      setErrors(newErrors);
     }
 
-    if (e.key.length === 1 && typed.length < text.length) {
-      const currentStartTime = startTime || Date.now();
-      if (!startTime) setStartTime(currentStartTime);
+    const newTyped = typed + char;
+    setTyped(newTyped);
 
-      const newTotalKeystrokes = totalKeystrokes + 1;
-      setTotalKeystrokes(newTotalKeystrokes);
+    if (newTyped.length === text.length) {
+      const end = Date.now();
+      const timeTakenSec = Math.round((end - currentStartTime) / 1000);
+      const durationMin = (end - currentStartTime) / 1000 / 60;
+      const correctKeystrokes = newTotalKeystrokes - newErrors;
+      const wpm = durationMin > 0 ? Math.round((correctKeystrokes / 5) / durationMin) : 0;
+      const acc = newTotalKeystrokes > 0
+        ? Math.round((correctKeystrokes / newTotalKeystrokes) * 100)
+        : 0;
+      onComplete({ wpm, acc, timeTaken: timeTakenSec });
+    }
+  };
 
-      const isCorrect = e.key === text[typed.length];
-      const newErrors = errors + (isCorrect ? 0 : 1);
-      if (!isCorrect) {
-        setErrors(newErrors);
+  const handleBackspace = () => {
+    setTyped((prev) => prev.slice(0, -1));
+  };
+
+  const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Backspace") {
+      e.preventDefault();
+      handleBackspace();
+      if (hiddenInputRef.current) {
+        hiddenInputRef.current.value = " ";
       }
+    }
+  };
 
-      const newTyped = typed + e.key;
-      setTyped(newTyped);
+  const handleInput = (e: FormEvent<HTMLTextAreaElement>) => {
+    const val = e.currentTarget.value;
+    if (val === " ") return;
 
-      if (newTyped.length === text.length) {
-        const end = Date.now();
-        const timeTakenSec = Math.round((end - currentStartTime) / 1000);
-        const durationMin = (end - currentStartTime) / 1000 / 60;
-        const correctKeystrokes = newTotalKeystrokes - newErrors;
-        const wpm = durationMin > 0 ? Math.round((correctKeystrokes / 5) / durationMin) : 0;
-        const acc = newTotalKeystrokes > 0
-          ? Math.round((correctKeystrokes / newTotalKeystrokes) * 100)
-          : 0;
-        onComplete({ wpm, acc, timeTaken: timeTakenSec });
+    if (val === "") {
+      handleBackspace();
+    } else if (val.length > 1) {
+      const added = val.slice(1);
+      for (let i = 0; i < added.length; i++) {
+        handleCharInput(added[i]);
       }
+    }
+
+    if (hiddenInputRef.current) {
+      hiddenInputRef.current.value = " ";
     }
   };
 
@@ -214,7 +242,10 @@ export function TypingTest({ sourceText, isCustom = false, onComplete }: TypingT
                   }}
                 >
                   <button
-                    onClick={() => setCustomMode('timed')}
+                    onClick={() => {
+                      setCustomMode('timed');
+                      focusInput();
+                    }}
                     style={{
                       padding: '8px 24px',
                       borderRadius: 'var(--radius-sm)',
@@ -233,7 +264,10 @@ export function TypingTest({ sourceText, isCustom = false, onComplete }: TypingT
                     ⏱ Timed
                   </button>
                   <button
-                    onClick={() => setCustomMode('free')}
+                    onClick={() => {
+                      setCustomMode('free');
+                      focusInput();
+                    }}
                     style={{
                       padding: '8px 24px',
                       borderRadius: 'var(--radius-sm)',
@@ -261,7 +295,7 @@ export function TypingTest({ sourceText, isCustom = false, onComplete }: TypingT
                         onClick={() => {
                           setTimeLimit(t);
                           setTimeLeft(t);
-                          containerRef.current?.focus();
+                          focusInput();
                         }}
                         style={{
                           padding: '6px 18px',
@@ -303,7 +337,10 @@ export function TypingTest({ sourceText, isCustom = false, onComplete }: TypingT
                   {(['time', 'words'] as const).map((m) => (
                     <button
                       key={m}
-                      onClick={() => setMode(m)}
+                      onClick={() => {
+                        setMode(m);
+                        focusInput();
+                      }}
                       style={{
                         padding: '8px 24px',
                         borderRadius: 'var(--radius-sm)',
@@ -333,7 +370,7 @@ export function TypingTest({ sourceText, isCustom = false, onComplete }: TypingT
                           onClick={() => {
                             setTimeLimit(t);
                             setTimeLeft(t);
-                            containerRef.current?.focus();
+                            focusInput();
                           }}
                           style={{
                             padding: '6px 18px',
@@ -356,7 +393,7 @@ export function TypingTest({ sourceText, isCustom = false, onComplete }: TypingT
                           key={w}
                           onClick={() => {
                             setWordLimit(w);
-                            containerRef.current?.focus();
+                            focusInput();
                           }}
                           style={{
                             padding: '6px 18px',
@@ -502,12 +539,39 @@ export function TypingTest({ sourceText, isCustom = false, onComplete }: TypingT
             border: '1px solid var(--border-subtle)',
             boxShadow: 'var(--shadow-card)',
             padding: '32px',
+            position: 'relative',
           }}
+          onClick={focusInput}
         >
+          {/* Hidden textarea to trigger mobile soft keyboard */}
+          <textarea
+            ref={hiddenInputRef}
+            defaultValue=" "
+            onKeyDown={handleKeyDown}
+            onInput={handleInput}
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
+            autoComplete="off"
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100%',
+              height: '100%',
+              opacity: 0,
+              zIndex: 10,
+              cursor: 'text',
+              resize: 'none',
+              border: 'none',
+              outline: 'none',
+              background: 'transparent',
+              color: 'transparent',
+            }}
+          />
+
           <div
             ref={containerRef}
-            tabIndex={0}
-            onKeyDown={handleKeyDown}
             style={{
               position: 'relative',
               outline: 'none',
@@ -567,7 +631,7 @@ export function TypingTest({ sourceText, isCustom = false, onComplete }: TypingT
           }}
         >
           {!startTime
-            ? 'Click the text area above and start typing to begin'
+            ? 'Tap the text area above to open keyboard and start typing'
             : 'Press Backspace to correct mistakes'}
         </p>
       </div>
